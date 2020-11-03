@@ -61,8 +61,8 @@ def ordered_dict_presenter(dumper, data):
 @click.option('--cluster-id', required=True, help="ID for source cluster")
 @click.option('--project-id', help="ID for source project (optional)")
 @click.option('--insecure', help="If set, do not verify tls certificates", is_flag=True)
-@click.option('--migrate-istio-dashboards', help="If set, Monitoring V1 Istio dashboards will automatically be migrated", is_flag=True)
-@click.option('--migrate-default-dashboards', help="If set, Monitoring V1 default dashboards will automatically be migrated", is_flag=True)
+@click.option('--migrate-istio-dashboards', help="If set, Monitoring V1 Istio dashboards will automatically be migrated. This flag will be ignored if a project-id is provided.", is_flag=True)
+@click.option('--migrate-default-dashboards', help="If set, Monitoring V1 default dashboards will automatically be migrated. This flag will be ignored if a project-id is provided.", is_flag=True)
 def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, migrate_istio_dashboards, migrate_default_dashboards):
     verify=not insecure
     requests.packages.urllib3.disable_warnings()
@@ -74,10 +74,8 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
 
     if project_id:
         base_url = "%s/k8s/clusters/%s/api/v1/namespaces/cattle-prometheus-%s/services/http:access-grafana:80/proxy" % (rancher_url, cluster_id, project_id)
-        base_name = "-%s" % project_id
     else:
         base_url = "%s/k8s/clusters/%s/api/v1/namespaces/cattle-prometheus/services/http:access-grafana:80/proxy" % (rancher_url, cluster_id)
-        base_name = ""
 
     all_dashboards_response = requests.get("%s/api/search" % base_url, headers=headers, verify=verify)
 
@@ -90,28 +88,31 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
                                           headers=headers, verify=verify)
         dashboard = json.loads(dashboard_response.content)
         dashboard_spec = dashboard["dashboard"]
-        if not migrate_istio_dashboards and dashboard_spec["title"] in DefaultIstioDashboards:
+        # Ignore migrating default dashboards if either:
+        # 1) the user is trying to migrate from a project (should be migrated on a cluster level)
+        # 2) if the relevant flag is not provided
+        if (project_id or not migrate_istio_dashboards) and dashboard_spec["title"] in DefaultIstioDashboards:
             continue
-        if not migrate_default_dashboards and dashboard_spec["title"] in DefaultClusterDashboards:
+        if (project_id or not migrate_default_dashboards) and dashboard_spec["title"] in DefaultClusterDashboards:
             continue
         if "tags" not in dashboard_spec:
             dashboard_spec["tags"] = []
         dashboard_spec["tags"].append("migrated")
-        dashboard_spec["title"] = "V1%s/%s" % (base_name, dashboard_spec["title"])
+        dashboard_spec["title"] = "V1/%s" % (dashboard_spec["title"])
         dashboard_json = json.dumps(dashboard_spec).replace("RANCHER_MONITORING", "Prometheus")
 
         config_map = {
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "metadata": {
-                "name": "migrated-dashboard%s-%s" % (base_name, dashboard["meta"]["slug"]),
+                "name": "migrated-dashboard-%s" % (dashboard["meta"]["slug"]),
                 "namespace": "cattle-dashboards",
                 "labels": {
                     "grafana_dashboard": "1"
                 }
             },
             "data": OrderedDict(**{
-                "v1%s-%s.json" % (base_name, dashboard["meta"]["slug"]): literal(dashboard_json)
+                "v1-%s.json" % (dashboard["meta"]["slug"]): literal(dashboard_json)
             })
         }
         configmap_list.append(yaml.dump(config_map))
