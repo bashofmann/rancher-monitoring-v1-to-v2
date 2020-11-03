@@ -4,6 +4,17 @@ import json
 import yaml
 from collections import OrderedDict
 
+DefaultIstioDashboards = [
+    "istio",
+    "Istio Citadel Dashboard",
+    "Istio Galley Dashboard",
+    "Istio Mesh Dashboard",
+    "Istio Mixer Dashboard",
+    "Istio Performance Dashboard",
+    "Istio Pilot Dashboard",
+    "Istio Service Dashboard",
+    "Istio Workload Dashboard",
+]
 
 class quoted(str):
     pass
@@ -37,7 +48,8 @@ def ordered_dict_presenter(dumper, data):
 @click.option('--cluster-id', required=True, help="ID for source cluster")
 @click.option('--project-id', help="ID for source project (optional)")
 @click.option('--insecure', help="If set, do not verify tls certificates", is_flag=True)
-def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure):
+@click.option('--migrate-istio-dashboards', help="If set, Monitoring V1 Istio dashboards will automatically be migrated", is_flag=True)
+def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, migrate_istio_dashboards):
     verify=not insecure
     requests.packages.urllib3.disable_warnings()
     yaml.add_representer(OrderedDict, ordered_dict_presenter)
@@ -64,6 +76,8 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure):
                                           headers=headers, verify=verify)
         dashboard = json.loads(dashboard_response.content)
         dashboard_spec = dashboard["dashboard"]
+        if not migrate_istio_dashboards and dashboard_spec["title"] in DefaultIstioDashboards:
+            continue
         if "tags" not in dashboard_spec:
             dashboard_spec["tags"] = []
         dashboard_spec["tags"].append("migrated")
