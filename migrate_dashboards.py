@@ -16,6 +16,19 @@ DefaultIstioDashboards = [
     "Istio Workload Dashboard",
 ]
 
+DefaultClusterDashboards = [
+    "Cluster",
+    "DaemonSet",
+    "Deployment",
+    "Etcd",
+    "Kubernetes Components",
+    "Kubernetes Resource Requests",
+    "Nodes",
+    "Pods",
+    "Rancher Components",
+    "StatefulSet"
+]
+
 class quoted(str):
     pass
 
@@ -49,7 +62,8 @@ def ordered_dict_presenter(dumper, data):
 @click.option('--project-id', help="ID for source project (optional)")
 @click.option('--insecure', help="If set, do not verify tls certificates", is_flag=True)
 @click.option('--migrate-istio-dashboards', help="If set, Monitoring V1 Istio dashboards will automatically be migrated", is_flag=True)
-def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, migrate_istio_dashboards):
+@click.option('--migrate-default-dashboards', help="If set, Monitoring V1 default dashboards will automatically be migrated", is_flag=True)
+def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, migrate_istio_dashboards, migrate_default_dashboards):
     verify=not insecure
     requests.packages.urllib3.disable_warnings()
     yaml.add_representer(OrderedDict, ordered_dict_presenter)
@@ -77,6 +91,8 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
         dashboard = json.loads(dashboard_response.content)
         dashboard_spec = dashboard["dashboard"]
         if not migrate_istio_dashboards and dashboard_spec["title"] in DefaultIstioDashboards:
+            continue
+        if not migrate_default_dashboards and dashboard_spec["title"] in DefaultClusterDashboards:
             continue
         if "tags" not in dashboard_spec:
             dashboard_spec["tags"] = []
