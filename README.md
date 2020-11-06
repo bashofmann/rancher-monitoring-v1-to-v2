@@ -67,3 +67,27 @@ python migrate_rules.py \
 
 kubectl create -f rules.yaml
 ```
+
+## Check why Monitoring V1 is not disabled
+
+The script checks to see why the Monitoring V1 Operator might still be deployed on your cluster and outputs a report.
+
+```
+Usage: check_monitoring_disabled.py [OPTIONS]
+
+Options:
+  --rancher-url TEXT        URL to source Rancher  [required]
+  --rancher-api-token TEXT  API Token for source Rancher  [required]
+  --cluster-id TEXT         ID for source cluster  [required]
+  --insecure                If set, do not verify tls certificates
+  --help                    Show this message and exit.
+```
+
+Example:
+
+```
+python check_monitoring_disabled.py \
+  --rancher-url https://rancher.example.com \
+  --rancher-api-token ABCDEF
+  --cluster-id c-123456
+```
