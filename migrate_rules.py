@@ -3,6 +3,7 @@ import requests
 import json
 import yaml
 import base64
+import sys
 from collections import OrderedDict
 
 ComparisonHasValue = "has-value"
@@ -23,6 +24,24 @@ comparisonMap = {
     ComparisonLessOrEqual: "<=",
 }
 
+NoResourcesToMigrate = """
+Warning: Cluster Alerting seems to be disabled.
+
+Could not extract any Alertmanager Config or any PrometheusRule resources from this cluster.
+
+If you believe resources should have been picked up for migration, please file a bug or feature request with Rancher at https://github.com/rancher/rancher/issues/new.
+"""
+
+WarnAlertmanagerConfigSecretDNE = """
+Warning: Cluster Alerting seems to be disabled.
+
+Could not extract any Alertmanager Config for this cluster.
+
+Any metric-based Alerting Groups / Alerting Rules have been outputted as PrometheusRule resources.
+
+However, you will need to manually configure Routes and Receivers to set up notifications based on those alerts.
+
+See Rancher docs for more information on how to configure notifications on alerts in Monitoring V2."""
 
 class quoted(str):
     pass
@@ -78,24 +97,26 @@ def migrate(rancher_url, rancher_api_token, cluster_id, insecure):
     # Get Alertmanager Config
     alerting_config_url = "%s/v3/project/%s/namespacedSecrets/cattle-prometheus:alertmanager-cluster-alerting" % (rancher_url, system_project_id)
     alerting_config_response = requests.get(alerting_config_url, headers=headers, verify=verify)
-    alerting_config = json.loads(alerting_config_response.content)
-    alertmanager_yaml = yaml.safe_load(
-        base64_decode(alerting_config["data"]["alertmanager.yaml"])
-    )
-
-    # Get Notifiers by ID
-    notifiers_by_id = {}
-    notifiers_url = "%s/v3/notifier" % (rancher_url)
-    notifiers_response = requests.get(notifiers_url, headers=headers, verify=verify)
-    notifiers = json.loads(notifiers_response.content)
-    for notifier in notifiers["data"]:
-        if notifier["clusterId"] != cluster_id:
-            continue
-        notifier_id = notifier["id"]
-        notifiers_by_id[notifier_id] = {
-            "name": notifier["name"],
-            "group_ids": []
-        }
+    alerting_enabled = (alerting_config_response.status_code != 404)
+    if alerting_enabled:
+        alerting_enabled=True
+        alerting_config = json.loads(alerting_config_response.content)
+        alertmanager_yaml = yaml.safe_load(
+            base64_decode(alerting_config["data"]["alertmanager.yaml"])
+        )
+        # Get Notifiers by ID
+        notifiers_by_id = {}
+        notifiers_url = "%s/v3/notifier" % (rancher_url)
+        notifiers_response = requests.get(notifiers_url, headers=headers, verify=verify)
+        notifiers = json.loads(notifiers_response.content)
+        for notifier in notifiers["data"]:
+            if notifier["clusterId"] != cluster_id:
+                continue
+            notifier_id = notifier["id"]
+            notifiers_by_id[notifier_id] = {
+                "name": notifier["name"],
+                "group_ids": []
+            }
 
     # Gather PrometheusRules from AlertGroups / AlertRules
     prometheus_rules = []
@@ -133,14 +154,16 @@ def migrate(rancher_url, rancher_api_token, cluster_id, insecure):
                     metric_rule["comparison"],
                     metric_rule["thresholdValue"]
                 )
+                labels = {"severity": alert_rule["severity"]}
+
+                if alerting_enabled:
+                    labels["group_id"] = alert_group["id"]
+                
                 rule = OrderedDict(**{
                     "alert": literal(alert_rule["name"]),
                     "expr": literal(prometheus_expression),
                     "for": metric_rule["duration"],
-                    "labels": {
-                        "severity": alert_rule["severity"],
-                        "group_id": alert_group["id"]
-                    },
+                    "labels": labels,
                     "annotations": OrderedDict(
                         message=literal(message),
                     )
@@ -177,14 +200,10 @@ def migrate(rancher_url, rancher_api_token, cluster_id, insecure):
 
             prometheus_rules.append(prometheus_rule)
 
-            if "recipients" in alert_group:
+            if alerting_enabled and "recipients" in alert_group:
                 for recipient in alert_group["recipients"]:
                     notifier_id = recipient["notifierId"]
                     notifiers_by_id[notifier_id]["group_ids"].append(alert_group["id"])
-
-    alertmanager_yaml = update_alertmanager_config(alertmanager_yaml, notifiers_by_id)
-
-    print(yaml.dump(alertmanager_yaml), end="---\n")
 
     # Create resources
     namespace = OrderedDict(**{
@@ -194,27 +213,42 @@ def migrate(rancher_url, rancher_api_token, cluster_id, insecure):
             "name": "cattle-monitoring-system"
         }
     })
+    resources = [namespace]
 
-    alerting_config = OrderedDict(**{
-        "apiVersion": "v1",
-        "kind": "Secret",
-        "metadata": {
-            "name": "alertmanager-rancher-monitoring-alertmanager",
-            "namespace": "cattle-monitoring-system",
-            "labels": {
-                "source": "rancher-alerting-v1"
+    if alerting_enabled:
+        alertmanager_yaml = update_alertmanager_config(alertmanager_yaml, notifiers_by_id)
+
+        alerting_config = OrderedDict(**{
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {
+                "name": "alertmanager-rancher-monitoring-alertmanager",
+                "namespace": "cattle-monitoring-system",
+                "labels": {
+                    "source": "rancher-alerting-v1"
+                },
             },
-        },
-        "data": {
-            "alertmanager.yaml": literal(base64_encode(yaml.dump(alertmanager_yaml))),
-            "notification.tmpl": literal(alerting_config["data"]["notification.tmpl"])
-        },
-        "type": "Opaque"
-    })
-    
-    resources = [namespace, alerting_config]
+            "data": {
+                "alertmanager.yaml": literal(base64_encode(yaml.dump(alertmanager_yaml))),
+                "notification.tmpl": literal(alerting_config["data"]["notification.tmpl"])
+            },
+            "type": "Opaque"
+        })
+        
+        resources.append(alerting_config)
+
+        # Print Alertmanager Config as comment since its encoded as base64 in the template
+        print("# Alertmanager Config\n#")
+        print("# %s" % yaml.dump(alertmanager_yaml).replace("\n", "\n# "))
 
     resources.extend(prometheus_rules)
+
+    if len(resources) == 1:
+        print(NoResourcesToMigrate, file=sys.stderr)
+        return
+    
+    if not alerting_enabled:
+        print(WarnAlertmanagerConfigSecretDNE, file=sys.stderr)
 
     print(yaml.dump_all(resources))
 
@@ -243,10 +277,15 @@ def update_alertmanager_config(alertmanager_yaml, notifiers_by_id):
     # Update Recievers attached to routes accordingly
     alertmanager_yaml["route"]["receiver"] = "null"
     alertmanager_yaml["route"]["group_by"] = ['job']
-    routes = []
+    routes = [{
+        "match": {"alertname": "Watchdog"},
+        "receiver": "null",
+        "continue": True
+    }]
     for route in alertmanager_yaml["route"]["routes"]:
         # Rule-specific routes are not supported
-        del route["routes"]
+        if "routes" in route:
+            del route["routes"]
         group_id = route["receiver"]
         if group_id in receiver_by_group_id:
             route["receiver"] = receiver_by_group_id[group_id]
