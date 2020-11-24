@@ -141,7 +141,7 @@ def migrate(rancher_url, rancher_api_token, cluster_id, insecure):
 
             rules = []
             for alert_rule in alert_rules["data"]:
-                if not alert_rule["creatorId"] or not alert_rule["metricRule"]:
+                if not alert_rule["creatorId"] or not alert_rule.get("metricRule"):
                     continue
                 metric_rule = alert_rule["metricRule"]
                 prometheus_expression = get_prometheus_expression(
