@@ -25,7 +25,6 @@ Options:
   --rancher-url TEXT        URL to source Rancher  [required]
   --rancher-api-token TEXT  API Token for source Rancher  [required]
   --cluster-id TEXT         ID for source cluster  [required]
-  --project-id TEXT         ID for source project (optional)
   --insecure                If set, do not verify tls certificates
   --help                    Show this message and exit.
 ```
@@ -52,7 +51,6 @@ Options:
   --rancher-url TEXT        URL to source Rancher  [required]
   --rancher-api-token TEXT  API Token for source Rancher  [required]
   --cluster-id TEXT         ID for source cluster  [required]
-  --project-id TEXT         ID for source project (optional)
   --insecure                If set, do not verify tls certificates
   --help                    Show this message and exit.
 ```

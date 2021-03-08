@@ -59,11 +59,10 @@ def ordered_dict_presenter(dumper, data):
 @click.option('--rancher-url', required=True, help="URL to source Rancher")
 @click.option('--rancher-api-token', required=True, help="API Token for source Rancher")
 @click.option('--cluster-id', required=True, help="ID for source cluster")
-@click.option('--project-id', help="ID for source project (optional)")
 @click.option('--insecure', help="If set, do not verify tls certificates", is_flag=True)
 @click.option('--migrate-istio-dashboards', help="If set, Monitoring V1 Istio dashboards will automatically be migrated. This flag will be ignored if a project-id is provided.", is_flag=True)
 @click.option('--migrate-default-dashboards', help="If set, Monitoring V1 default dashboards will automatically be migrated. This flag will be ignored if a project-id is provided.", is_flag=True)
-def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, migrate_istio_dashboards, migrate_default_dashboards):
+def migrate(rancher_url, rancher_api_token, cluster_id, insecure, migrate_istio_dashboards, migrate_default_dashboards):
     verify=not insecure
     requests.packages.urllib3.disable_warnings()
     yaml.add_representer(OrderedDict, ordered_dict_presenter)
@@ -72,15 +71,27 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
         "authorization": "Bearer %s" % rancher_api_token
     }
 
-    if project_id:
+    projects_url = "%s/v3/projects" % rancher_url
+    projects_response = requests.get(projects_url, headers=headers, verify=verify)
+    projects = json.loads(projects_response.content)
+    configmap_list = []
+
+    for project in projects["data"]:
+        project_id = project["id"].split(":")[1]
         base_url = "%s/k8s/clusters/%s/api/v1/namespaces/cattle-prometheus-%s/services/http:access-grafana:80/proxy" % (rancher_url, cluster_id, project_id)
-    else:
-        base_url = "%s/k8s/clusters/%s/api/v1/namespaces/cattle-prometheus/services/http:access-grafana:80/proxy" % (rancher_url, cluster_id)
+        configmap_list = configmap_list + get_dashboards(base_url, headers, verify, migrate_istio_dashboards, migrate_default_dashboards, True)
 
+    base_url = "%s/k8s/clusters/%s/api/v1/namespaces/cattle-prometheus/services/http:access-grafana:80/proxy" % (rancher_url, cluster_id)
+    configmap_list = configmap_list + get_dashboards(base_url, headers, verify, migrate_istio_dashboards, migrate_default_dashboards, False)
+
+    print("---\n".join(configmap_list))
+
+
+def get_dashboards(base_url, headers, verify, migrate_istio_dashboards, migrate_default_dashboards, is_project):
     all_dashboards_response = requests.get("%s/api/search" % base_url, headers=headers, verify=verify)
-
+    if all_dashboards_response.status_code == 404:
+        return []
     all_dashboards = json.loads(all_dashboards_response.content)
-
     configmap_list = []
 
     for dashboard_ref in all_dashboards:
@@ -91,9 +102,9 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
         # Ignore migrating default dashboards if either:
         # 1) the user is trying to migrate from a project (should be migrated on a cluster level)
         # 2) if the relevant flag is not provided
-        if (project_id or not migrate_istio_dashboards) and dashboard_spec["title"] in DefaultIstioDashboards:
+        if (is_project or not migrate_istio_dashboards) and dashboard_spec["title"] in DefaultIstioDashboards:
             continue
-        if (project_id or not migrate_default_dashboards) and dashboard_spec["title"] in DefaultClusterDashboards:
+        if (is_project or not migrate_default_dashboards) and dashboard_spec["title"] in DefaultClusterDashboards:
             continue
         if "tags" not in dashboard_spec:
             dashboard_spec["tags"] = []
@@ -117,7 +128,7 @@ def migrate(rancher_url, rancher_api_token, cluster_id, project_id, insecure, mi
         }
         configmap_list.append(yaml.dump(config_map))
 
-    print("---\n".join(configmap_list))
+    return configmap_list
 
 
 if __name__ == '__main__':
