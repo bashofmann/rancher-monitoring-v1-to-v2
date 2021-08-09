@@ -1,0 +1,7 @@
+version: "3"
+services:
+  rancher-monitoring-v1-to-v2:
+    container_name: rancher-monitoring-v1-to-v2
+    hostname: rancher-monitoring-v1-to-v2
+    build: .
+    image: bashofmann/rancher-monitoring-v1-to-v2:latest
