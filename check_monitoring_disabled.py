@@ -79,6 +79,7 @@ def check_if_monitoring_is_disabled(rancher_url, rancher_api_token, cluster_id, 
     project_monitoring_enabled = []
     projects_url = "%s/v3/projects" % (rancher_url)
     projects_response = requests.get(projects_url, headers=headers, verify=verify)
+    projects_response.raise_for_status()
     projects = json.loads(projects_response.content)
     for project in projects["data"]:
         if project["clusterId"] != cluster_id:
