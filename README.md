@@ -89,3 +89,21 @@ python check_monitoring_disabled.py \
   --rancher-api-token ABCDEF
   --cluster-id c-123456
 ```
+
+# Building and running with Docker
+
+You can also run the scripts inside of a Docker image
+
+## Building
+
+```
+make build -e VERSION=0.0.1
+```
+
+## Running
+
+Example:
+
+```
+docker run bashofmann/rancher-monitoring-v1-to-v2:0.0.1 check_monitoring_disabled.py --rancher-url https://rancher.example.com --rancher-api-token $API_TOKEN --cluster-id $CLUSTER_ID
+```
