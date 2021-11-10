@@ -1,6 +1,7 @@
 # rancher-monitoring v1 to v2 migration
 
 Small helper scripts to migrate alerts and Grafana dashboards from monitoring v1 to v2 introduced in Rancher 2.5.
+These require the use of a Rancher Bearer API Token with no scope.
 
 ## Installation
 
